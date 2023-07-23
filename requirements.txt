@@ -1,0 +1,4 @@
+schedule
+sounddevice
+numpy
+wavio
