@@ -11,13 +11,17 @@ from utils import parse_schedule, time_string_to_seconds, get_default_recorder_c
 
 def record_event(event):
     def exec_hook(phase):
-        if phase in event:
+        if phase not in event:
+            return
+        try:
             hook = event[phase]
             func = hook.get('func', None)
             if func is None:
                 return
             func_args = hook.get('args', {})
             func(context, **func_args)
+        except Exception as e:
+            print(f'An error occurred while trying to run ${phase}')
 
     recorder_config = get_default_recorder_config()
     recorder_config.update(event.get("recorder_config", {}))
@@ -33,7 +37,7 @@ def record_event(event):
     # Record audio
     duration = time_string_to_seconds(event['duration'])
     audio_data = sd.rec(
-        frames = int(duration * recorder_config['sample_rate']),
+        frames=int(duration * recorder_config['sample_rate']),
         samplerate=recorder_config['sample_rate'], 
         channels=recorder_config['channels'],
         dtype=recorder_config['bit_depth']
@@ -46,27 +50,17 @@ def record_event(event):
 
     # Save to file
     filename = context['created_at'].strftime(event['filename'])
+    wavio.write(
+        file=f"{filename}.wav", 
+        data=audio_data, 
+        rate=recorder_config['sample_rate'],
+    )
     format = event.get('format', 'wav')
     if format == 'mp3':
-        # Convert the audio data to an AudioSegment
-        audio_segment = AudioSegment(
-            audio_data.tobytes(), 
-            frame_rate=recorder_config['sample_rate'],
-            sample_width=audio_data.dtype.itemsize, 
-            channels=recorder_config['channels']
-        )
-        
-        # Export the AudioSegment as an MP3 file
-        audio_segment.export(f"{filename}.mp3", format="mp3")
-    elif format == 'wav':
-        wavio.write(
-            file=f"{filename}.wav", 
-            data=audio_data, 
-            rate=recorder_config['sample_rate'],
-        )
+        # Convert the audio data to an mp3
+        AudioSegment.from_wav(f"{filename}.wav").export(f"{filename}.mp3", format='mp3')
     
     exec_hook('on_complete')
-
 
 def schedule_event(schedule_string, event):
     schedule_data = parse_schedule(schedule_string)
@@ -118,7 +112,8 @@ def main():
         print(f"Unable to find the configuration {args.config}.py")
         exit(1)
     for event in config_module.SCHEDULED_EVENTS:
-        schedule_event(event['schedule'], event['event'])
+        for curr_schedule in event['schedule'].split(','):
+            schedule_event(curr_schedule, event['event'])
 
     while True:
         schedule.run_pending()
